@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cdms_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: cdms_user
+      POSTGRES_PASSWORD: cdms_password
+      POSTGRES_DB: cdms_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cdms_user -d cdms_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

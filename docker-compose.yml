@@ -17,5 +17,16 @@ services:
       timeout: 5s
       retries: 5
 
+  mock_vietful:
+    build:
+      context: .
+      dockerfile: mock_vietful/Dockerfile
+    container_name: cdms_mock_vietful
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+
 volumes:
   postgres_data:

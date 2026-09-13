@@ -1,7 +1,7 @@
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from app.db.base import Base
 from app.models.product import ProductSnapshot, ProductChangeEvent, IngestionBatch
 from app.schemas.product import VietfulProductInput
@@ -33,12 +33,10 @@ async def test_postgres_live_exactly_once(pg_session: AsyncSession):
     """
     test_sku = "PG-TEST-001"
     
-    # Cleanup any prior test run
-    existing = await pg_session.execute(select(ProductSnapshot).where(ProductSnapshot.sku == test_sku))
-    obj = existing.scalar_one_or_none()
-    if obj:
-        await pg_session.delete(obj)
-        await pg_session.commit()
+    # Cleanup any prior test run in both tables
+    await pg_session.execute(delete(ProductChangeEvent).where(ProductChangeEvent.sku == test_sku))
+    await pg_session.execute(delete(ProductSnapshot).where(ProductSnapshot.sku == test_sku))
+    await pg_session.commit()
 
     product = VietfulProductInput(
         sku=test_sku,

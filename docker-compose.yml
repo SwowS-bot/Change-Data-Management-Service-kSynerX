@@ -51,5 +51,17 @@ services:
       mock_vietful:
         condition: service_started
 
+  cdms_frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: cdms_frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - cdms_backend
+      - mock_vietful
+
 volumes:
   postgres_data:

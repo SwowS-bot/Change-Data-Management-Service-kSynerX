@@ -36,45 +36,52 @@ The architecture follows the **Basic System Specification** defined in the techn
 
 ```mermaid
 graph TD
-    subgraph Clients & Upstream Sources
-        Vietful["Emulating Vietful Inventory Service<br/>(Port 8001 / Faker Catalog)"]
-        CallbackClient["EmulatingCallbackClient<br/>(Push Events + Duplicates)"]
-        ExcelClient["REST-based Client<br/>(Uploads .xlsx Files)"]
+    subgraph Clients["Clients and Upstream Sources"]
+        Vietful["Emulating Vietful Inventory Service<br/>Port 8001 / Faker Catalog"]
+        CallbackClient["EmulatingCallbackClient<br/>Push Events + Duplicates"]
+        ExcelClient["REST-based Client<br/>Uploads .xlsx Files"]
     end
 
-    subgraph CDMS ["Change Data Management Service (CDMS - Port 8000)"]
-        subgraph Ingestion ["Ingestion Layer"]
-            PollerWorker["Scheduled Poller Engine<br/>(Interval: 10s + Circuit Breaker)"]
-            WebhookEndpoint["Webhook API Endpoint<br/>(POST /api/v1/cdc/webhook)"]
-            ExcelEndpoint["Excel Upload API<br/>(POST /api/v1/cdc/upload-excel)"]
+    subgraph CDMS["Change Data Management Service - CDMS Port 8000"]
+        subgraph Ingestion["Ingestion Layer"]
+            PollerWorker["Scheduled Poller Engine<br/>Interval: 10s + Circuit Breaker"]
+            WebhookEndpoint["Webhook API Endpoint<br/>POST /api/v1/cdc/webhook"]
+            ExcelEndpoint["Excel Upload API<br/>POST /api/v1/cdc/upload-excel"]
         end
 
-        subgraph Engine ["CDC Core Engine"]
-            Normalizer["Canonical JSON Normalizer<br/>(Whitespace strip, key sort)"]
-            Hasher["SHA-256 Content Hasher<br/>(Deterministic Checksum)"]
-            DiffEngine["Field-Level Diff Engine<br/>(Old vs New value extraction)"]
-            LockManager["Row-Level Lock & Concurrency<br/>(Pessimistic lock + Retry)"]
+        subgraph Engine["CDC Core Engine"]
+            Normalizer["Canonical JSON Normalizer<br/>Whitespace strip, key sort"]
+            Hasher["SHA-256 Content Hasher<br/>Deterministic Checksum"]
+            DiffEngine["Field-Level Diff Engine<br/>Old vs New value extraction"]
+            LockManager["Row-Level Lock and Concurrency<br/>Pessimistic lock + Retry"]
         end
     end
 
-    subgraph Storage ["Change Database (PostgreSQL 16 - Port 5433)"]
+    subgraph Storage["Change Database - PostgreSQL 16 Port 5433"]
         Snapshots[("products_snapshot<br/>Latest State per SKU")]
         ChangeEvents[("product_change_events<br/>STRICT: ONLY Changed Data")]
-        Batches[("ingestion_batches<br/>Audit & Performance Metrics")]
+        Batches[("ingestion_batches<br/>Audit and Performance Metrics")]
     end
 
-    subgraph Presentation ["Presentation Layer (Port 3000)"]
-        Dashboard["React 18 Dashboard<br/>(Tailwind CSS + Nginx Reverse Proxy)"]
+    subgraph Presentation["Presentation Layer - Port 3000"]
+        Dashboard["React 18 Dashboard<br/>Tailwind CSS + Nginx Reverse Proxy"]
     end
 
-    Vietful <-->|Query Inventory Data (Periodic)| PollerWorker
-    CallbackClient -->|Call Webhook API & Push Data| WebhookEndpoint
+    Vietful -->|Query Inventory Data| PollerWorker
+    PollerWorker -->|Inventory Data Response| Vietful
+    CallbackClient -->|Call Webhook API and Push Data| WebhookEndpoint
     ExcelClient -->|Upload Data in Excel Files| ExcelEndpoint
 
-    PollerWorker & WebhookEndpoint & ExcelEndpoint --> Normalizer
-    Normalizer --> Hasher --> DiffEngine --> LockManager
-    LockManager -->|Store ONLY New / Changed Data| Storage
-    Storage -.->|Real-time Metrics & Audit Stream| Dashboard
+    PollerWorker --> Normalizer
+    WebhookEndpoint --> Normalizer
+    ExcelEndpoint --> Normalizer
+
+    Normalizer --> Hasher
+    Hasher --> DiffEngine
+    DiffEngine --> LockManager
+
+    LockManager -->|Store ONLY New or Changed Data| Storage
+    Storage -.->|Real-time Metrics and Audit Stream| Dashboard
 ```
 
 ### Containerized Ecosystem Summary:
@@ -92,22 +99,22 @@ graph TD
 
 ```mermaid
 flowchart TD
-    A[Incoming Product Payload] --> B[Canonical Normalization<br/>Strip whitespace, sort keys]
-    B --> C[SHA-256 Content Checksum<br/>Deterministic 64-char hex]
-    C --> D{Query Existing Snapshot<br/>with Pessimistic Lock}
+    A["Incoming Product Payload"] --> B["Canonical Normalization<br/>Strip whitespace, sort keys"]
+    B --> C["SHA-256 Content Checksum<br/>Deterministic 64-char hex"]
+    C --> D{"Query Existing Snapshot<br/>with Pessimistic Lock"}
 
-    D -->|Row Not Found| E[Classification: INSERTED]
-    E --> E1[Store new Snapshot v1]
-    E --> E2[Store 1 Event in product_change_events]
+    D -->|Row Not Found| E["Classification: INSERTED"]
+    E --> E1["Store new Snapshot v1"]
+    E --> E2["Store 1 Event in product_change_events"]
 
-    D -->|Row Exists| F{Compare existing.content_hash == new_hash}
-    F -->|Equal: Unchanged| G[Classification: DUPLICATE]
-    G --> G1[STRICT EXACTLY-ONCE: NO-OP<br/>Drop silently, ZERO event stored]
+    D -->|Row Exists| F{"Compare Hashes<br/>existing.content_hash vs new_hash"}
+    F -->|Equal: Unchanged| G["Classification: DUPLICATE"]
+    G --> G1["STRICT EXACTLY-ONCE: NO-OP<br/>Drop silently, ZERO event stored"]
 
-    F -->|Different: Content Modified| H[Classification: UPDATED]
-    H --> H1[Compute Field-Level Diff: old vs new]
-    H --> H2[Increment version++]
-    H --> H3[Store 1 Event in product_change_events]
+    F -->|Different: Content Modified| H["Classification: UPDATED"]
+    H --> H1["Compute Field-Level Diff<br/>old vs new"]
+    H --> H2["Increment version"]
+    H --> H3["Store 1 Event in product_change_events"]
 ```
 
 ---
@@ -248,9 +255,3 @@ python -m mock_client.callback_client --url http://localhost:8000/api/v1/cdc/web
 ```
 
 ---
-
-## 📚 Deliverable Documents
-
-- [ARCHITECTURE.md](./ARCHITECTURE.md): Chi tiết kiến trúc kỹ thuật, thiết kế CSDL, thuật toán Exactly-Once và cơ chế chịu lỗi.
-- [LESSONS_LEARNED.md](./LESSONS_LEARNED.md): Bài học kinh nghiệm, thách thức kỹ thuật và các đánh đổi kiến trúc.
-- [FEATURES_AND_AI_TRANSPARENCY.md](./FEATURES_AND_AI_TRANSPARENCY.md): Bảng phân định tính năng hoàn thành vs tương lai, bản giải trình minh bạch việc sử dụng AI theo yêu cầu đề bài.

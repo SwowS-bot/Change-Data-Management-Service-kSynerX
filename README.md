@@ -248,10 +248,7 @@ python -m mock_client.callback_client --url http://localhost:8000/api/v1/cdc/web
 │   ├── Dockerfile                 # Multi-stage Nginx containerization
 │   ├── nginx.conf                 # Nginx reverse proxy configuration
 │   └── package.json               # Node dependencies
-├── docker-compose.yml             # Full-stack multi-container orchestration
-├── ARCHITECTURE.md                # Deep-dive architecture & Exactly-Once design
-├── LESSONS_LEARNED.md             # Technical lessons & engineering trade-offs
-└── FEATURES_AND_AI_TRANSPARENCY.md# Feature checklist & AI tool disclosure
+└── docker-compose.yml             # Full-stack multi-container orchestration
 ```
 
 ---

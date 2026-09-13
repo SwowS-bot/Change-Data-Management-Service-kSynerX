@@ -28,5 +28,28 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
 
+  cdms_backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cdms_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=cdms_user
+      - POSTGRES_PASSWORD=cdms_password
+      - POSTGRES_DB=cdms_db
+      - VIETFUL_API_URL=http://mock_vietful:8001
+      - POLLING_INTERVAL_SECONDS=10
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock_vietful:
+        condition: service_started
+
 volumes:
   postgres_data:

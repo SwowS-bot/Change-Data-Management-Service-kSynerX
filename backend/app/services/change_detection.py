@@ -88,70 +88,112 @@ class ChangeDetectionEngine:
         new_hash = compute_content_hash(raw_dict)
         sku = product.sku.strip()
 
-        # Row-level lock on existing snapshot row to prevent concurrent race conditions
-        stmt = (
-            select(ProductSnapshot)
-            .where(ProductSnapshot.sku == sku)
-            .with_for_update()
-        )
-        result = await session.execute(stmt)
-        existing: Optional[ProductSnapshot] = result.scalar_one_or_none()
+        from sqlalchemy.exc import IntegrityError
 
-        if existing is None:
-            # 1. NEW PRODUCT -> INSERT
-            snapshot = ProductSnapshot(
-                sku=sku,
-                partner_sku=product.partnerSKU,
-                product_name=product.productName,
-                asset_type=product.assetType or "Single",
-                price=product.price or 0.0,
-                stock_quantity=product.stockQuantity or 0,
-                raw_payload=raw_dict,
-                content_hash=new_hash,
-                version=1,
+        try:
+            # Row-level lock on existing snapshot row to prevent concurrent race conditions
+            stmt = (
+                select(ProductSnapshot)
+                .where(ProductSnapshot.sku == sku)
+                .with_for_update()
             )
-            session.add(snapshot)
+            result = await session.execute(stmt)
+            existing: Optional[ProductSnapshot] = result.scalar_one_or_none()
+
+            if existing is None:
+                # 1. NEW PRODUCT -> INSERT
+                snapshot = ProductSnapshot(
+                    sku=sku,
+                    partner_sku=product.partnerSKU,
+                    product_name=product.productName,
+                    asset_type=product.assetType or "Single",
+                    price=product.price or 0.0,
+                    stock_quantity=product.stockQuantity or 0,
+                    raw_payload=raw_dict,
+                    content_hash=new_hash,
+                    version=1,
+                )
+                session.add(snapshot)
+
+                event = ProductChangeEvent(
+                    sku=sku,
+                    change_type="INSERT",
+                    old_hash=None,
+                    new_hash=new_hash,
+                    diff_data=raw_dict,
+                    source=source,
+                )
+                session.add(event)
+                await session.flush()
+                return "INSERTED", event
+
+            # 2. CHECK IF CONTENT CHANGED
+            if existing.content_hash == new_hash:
+                # EXACTLY-ONCE GUARANTEE: Content is identical, skip recording any change!
+                return "DUPLICATE", None
+
+            # 3. CONTENT HAS CHANGED -> UPDATE
+            diff = compute_diff(existing.raw_payload, raw_dict)
+            old_hash = existing.content_hash
+
+            # Update snapshot attributes
+            existing.partner_sku = product.partnerSKU
+            existing.product_name = product.productName
+            existing.asset_type = product.assetType or "Single"
+            existing.price = product.price or 0.0
+            existing.stock_quantity = product.stockQuantity or 0
+            existing.raw_payload = raw_dict
+            existing.content_hash = new_hash
+            existing.version += 1
 
             event = ProductChangeEvent(
                 sku=sku,
-                change_type="INSERT",
-                old_hash=None,
+                change_type="UPDATE",
+                old_hash=old_hash,
                 new_hash=new_hash,
-                diff_data=raw_dict,
+                diff_data=diff,
                 source=source,
             )
             session.add(event)
-            return "INSERTED", event
+            await session.flush()
+            return "UPDATED", event
 
-        # 2. CHECK IF CONTENT CHANGED
-        if existing.content_hash == new_hash:
-            # EXACTLY-ONCE GUARANTEE: Content is identical, skip recording any change!
+        except IntegrityError:
+            # Race condition: Another concurrent transaction inserted the same SKU
+            await session.rollback()
+            stmt = (
+                select(ProductSnapshot)
+                .where(ProductSnapshot.sku == sku)
+                .with_for_update()
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing:
+                if existing.content_hash == new_hash:
+                    return "DUPLICATE", None
+                diff = compute_diff(existing.raw_payload, raw_dict)
+                old_hash = existing.content_hash
+                existing.partner_sku = product.partnerSKU
+                existing.product_name = product.productName
+                existing.asset_type = product.assetType or "Single"
+                existing.price = product.price or 0.0
+                existing.stock_quantity = product.stockQuantity or 0
+                existing.raw_payload = raw_dict
+                existing.content_hash = new_hash
+                existing.version += 1
+
+                event = ProductChangeEvent(
+                    sku=sku,
+                    change_type="UPDATE",
+                    old_hash=old_hash,
+                    new_hash=new_hash,
+                    diff_data=diff,
+                    source=source,
+                )
+                session.add(event)
+                await session.flush()
+                return "UPDATED", event
             return "DUPLICATE", None
-
-        # 3. CONTENT HAS CHANGED -> UPDATE
-        diff = compute_diff(existing.raw_payload, raw_dict)
-        old_hash = existing.content_hash
-
-        # Update snapshot attributes
-        existing.partner_sku = product.partnerSKU
-        existing.product_name = product.productName
-        existing.asset_type = product.assetType or "Single"
-        existing.price = product.price or 0.0
-        existing.stock_quantity = product.stockQuantity or 0
-        existing.raw_payload = raw_dict
-        existing.content_hash = new_hash
-        existing.version += 1
-
-        event = ProductChangeEvent(
-            sku=sku,
-            change_type="UPDATE",
-            old_hash=old_hash,
-            new_hash=new_hash,
-            diff_data=diff,
-            source=source,
-        )
-        session.add(event)
-        return "UPDATED", event
 
     @staticmethod
     async def process_batch(
